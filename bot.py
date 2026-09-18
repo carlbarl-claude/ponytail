@@ -18,6 +18,7 @@ and trimmed so requests stay affordable. The chosen subject persists across rest
 """
 
 import os
+import sys
 import json
 import collections
 
@@ -159,6 +160,17 @@ async def respond(channel, channel_id: int, user_text: str) -> None:
 async def on_ready():
     await tree.sync()
     print(f"Logged in as {client.user} — tutoring {len(prompts.SUBJECTS)} AP subjects.")
+    # Print a ready-to-click invite link so adding the bot to a server is copy-paste.
+    perms = discord.Permissions(
+        view_channel=True, send_messages=True,
+        embed_links=True, read_message_history=True,
+    )
+    url = discord.utils.oauth_url(
+        client.user.id, permissions=perms, scopes=("bot", "applications.commands")
+    )
+    print("\nTo add this bot to a Discord server, open this link and pick the server:")
+    print("  " + url + "\n")
+    print("The bot is ready. Mention it in a channel or DM it to start. (Ctrl+C to stop.)")
 
 
 @client.event
@@ -318,9 +330,10 @@ def main():
                if not os.environ.get(name)]
     if missing:
         raise SystemExit(
-            "Missing required setting(s): " + ", ".join(missing) + ".\n"
-            "Copy .env.example to .env and fill them in (the bot auto-loads .env),\n"
-            "or export them as environment variables. See the README for details.\n"
+            "This bot isn't set up yet (missing: " + ", ".join(missing) + ").\n\n"
+            "Easiest fix — run the setup wizard, which walks you through it:\n"
+            f"    {os.path.basename(sys.executable)} setup.py\n"
+            "or just double-click run.sh (Mac/Linux) or run.bat (Windows).\n\n"
             "Tip: to try the tutor without Discord, run `python chat.py` "
             "(only ANTHROPIC_API_KEY needed)."
         )

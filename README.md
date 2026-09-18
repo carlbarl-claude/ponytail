@@ -68,6 +68,16 @@ scored samples and feeds them to Claude, instructing it to cite them.
 
 ## Setup
 
+**Not technical? Start here:** open **[SETUP.md](SETUP.md)** — a click-by-click guide
+you can follow on a call. The short version:
+
+1. Install [Python](https://www.python.org/downloads/) (on Windows, tick *Add Python to PATH*).
+2. Double-click **`run.sh`** (Mac/Linux) or **`run.bat`** (Windows) — or run `python setup.py`.
+3. The **setup wizard** installs everything, asks for your two tokens, checks them,
+   writes the config for you, and prints the link to add the bot to your server.
+
+The manual steps below are the same thing, spelled out.
+
 ### 1. Create the Discord bot
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**.
 2. Open the **Bot** tab → **Reset Token** → copy the token (this is your `DISCORD_TOKEN`).
@@ -102,6 +112,9 @@ environment — roughly half the cost, still a strong tutor.
 
 ## Files
 
+- `SETUP.md` — the click-by-click, non-technical setup guide
+- `setup.py` — the interactive setup wizard (installs deps, validates tokens, invite link)
+- `run.sh` / `run.bat` — one-command start for Mac/Linux and Windows
 - `bot.py` — the Discord bot (events, commands, uploads, message splitting)
 - `chat.py` — local terminal test mode (no Discord needed)
 - `tutor.py` — shared tutoring/grading/quiz prompt logic used by the bot and CLI
