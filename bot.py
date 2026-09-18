@@ -20,6 +20,7 @@ import discord
 from discord import app_commands
 
 import prompts
+import rag
 
 # --- Configuration ---------------------------------------------------------
 
@@ -76,10 +77,36 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
     return chunks
 
 
+# Appended to the subject system prompt to tell Claude how to use retrieved material.
+_GROUNDING_INSTRUCTIONS = """
+--- Using the study library ---
+Below you may be given a STUDY LIBRARY CONTEXT block: excerpts retrieved from a
+library of AP rubrics, scored sample responses, and the student's own uploaded notes.
+When it's relevant to the question:
+- Cite the specific rubric criterion by name (e.g., "DBQ · Complexity (1 pt)").
+- When a scored sample is relevant, reference it and explain *why* it earned (or lost)
+  its score — connect the student's situation to that example.
+- Prefer the retrieved material over generic advice for anything about scoring.
+- Samples labeled "scored sample" in the built-in library are illustrative/synthetic
+  teaching examples, not official College Board samples — you may say so if asked.
+  Material labeled "your upload" is the student's own file.
+If the context doesn't cover something, use your general AP knowledge and say the
+library didn't have specifics on it. Never invent a rubric point value or a fake
+"official sample" — only cite what's actually provided or well-established.
+"""
+
+
 async def ask_claude(channel_id: int, user_text: str) -> str:
     """Send the channel's history plus the new message to Claude and return the reply."""
-    subject_name, system_prompt = prompts.SUBJECTS[subject_for(channel_id)]
+    subject_key = subject_for(channel_id)
+    subject_name, system_prompt = prompts.SUBJECTS[subject_key]
     history = _histories[channel_id]
+
+    # Retrieve relevant rubric/sample/upload excerpts and ground the answer in them.
+    system_prompt = system_prompt + _GROUNDING_INSTRUCTIONS
+    context_block = rag.build_context(subject_key, user_text)
+    if context_block:
+        system_prompt = system_prompt + "\n\n" + context_block
 
     messages = list(history) + [{"role": "user", "content": user_text}]
 
@@ -136,6 +163,19 @@ async def on_message(message: discord.Message):
     if not (is_dm or is_mention):
         return  # Only engage when spoken to.
 
+    # Ingest any attached study materials (PDF/TXT/MD) into the channel's subject.
+    subject_key = subject_for(message.channel.id)
+    ingestible = [
+        a for a in message.attachments
+        if os.path.splitext(a.filename)[1].lower() in {".pdf", ".txt", ".md"}
+    ]
+    if ingestible:
+        async with message.channel.typing():
+            for att in ingestible:
+                data = await att.read()
+                ok, note = rag.ingest_upload(subject_key, att.filename, data)
+                await message.channel.send(note)
+
     # Strip the bot mention out of the text so it doesn't confuse Claude.
     content = message.content
     if is_mention:
@@ -174,6 +214,29 @@ async def subject_cmd(interaction: discord.Interaction, subject: app_commands.Ch
     )
 
 
+@tree.command(name="sources", description="Show what's in the study library for this channel.")
+async def sources_cmd(interaction: discord.Interaction):
+    subject_key = subject_for(interaction.channel_id)
+    subject_name = prompts.SUBJECTS[subject_key][0]
+    summary = rag.library_summary(subject_key)
+    await interaction.response.send_message(
+        f"**{subject_name} study library**\n{summary}\n\n"
+        "Attach a **PDF, TXT, or MD** file in a message to me to add your own notes, "
+        "study guides, or official released samples — I'll cite them when relevant. "
+        "See `knowledge/sources.md` in the repo for where to download official materials.",
+        ephemeral=True,
+    )
+
+
+@tree.command(name="reindex", description="Rebuild the study library index for this channel's subject.")
+async def reindex_cmd(interaction: discord.Interaction):
+    subject_key = subject_for(interaction.channel_id)
+    count = rag.reindex(subject_key)
+    await interaction.response.send_message(
+        f"Rebuilt the library index — {count} sections indexed. ✅", ephemeral=True
+    )
+
+
 @tree.command(name="reset", description="Clear our conversation history in this channel.")
 async def reset_cmd(interaction: discord.Interaction):
     _histories.pop(interaction.channel_id, None)
@@ -189,11 +252,17 @@ async def help_cmd(interaction: discord.Interaction):
         "• Mention me (`@me your question`) or DM me directly.\n"
         "• I focus on *understanding*: I'll explain concepts, walk through problems, "
         "and coach your writing — but I won't do graded work for you.\n\n"
+        "• I ground my scoring advice in a **study library** of rubrics and scored "
+        "samples, and I'll cite the exact rubric line and a sample when it helps.\n"
+        "• **Upload your own** notes/readings/PDFs — just attach a PDF, TXT, or MD "
+        "file and I'll start using it.\n\n"
         "**Commands**\n"
         "• `/subject` — switch between AP Seminar and AP European History.\n"
+        "• `/sources` — see what's in the study library here.\n"
+        "• `/reindex` — rebuild the library index after adding files.\n"
         "• `/reset` — clear our conversation history in this channel.\n"
         "• `/help` — show this message.\n\n"
-        "Try: *\"Explain HIPP with an example\"* or *\"Help me sharpen my research question.\"*",
+        "Try: *\"Explain HIPP with an example\"* or *\"Grade this thesis against the DBQ rubric.\"*",
         ephemeral=True,
     )
 
