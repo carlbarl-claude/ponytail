@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>100</ID>
+      <Description>"=== NFS: The Run - Corner Speed Assist ==="</Description>
+      <GroupHeader>1</GroupHeader>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>101</ID>
+      <Description>"Speed  (SET THIS - see README step 1)"</Description>
+      <ShowAsHex>0</ShowAsHex>
+      <VariableType>Float</VariableType>
+      <Address>0</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>102</ID>
+      <Description>"[ Enable ] Anti-Scrub  (keep corner speed)"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{$lua}
+if syntaxcheck then return end
+--------------------------------------------------------------------
+-- NFS: The Run - Corner Speed Assist (anti-scrub)
+--------------------------------------------------------------------
+-- Reads the memory record described exactly "Speed" (entry above),
+-- watches it every tick, and when speed drops a SMALL amount
+-- (cornering scrub) it gives most of that speed back. A LARGE drop
+-- (you braking) is left alone.
+--------------------------------------------------------------------
+
+corner = corner or {}
+
+-- === TUNABLES ==============================================
+corner.retain   = 0.90   -- fraction of scrubbed speed to give back (0..1). Higher = holds more speed.
+corner.brakeCut = 3.0    -- per-tick drop bigger than this is treated as BRAKING (left alone).
+                         -- Units are "whatever the Speed value is per 16ms". Tune while playing.
+corner.interval = 16     -- ms between checks (16 = ~60fps).
+-- ===========================================================
+
+corner.prev = nil
+
+function corner.speedRec()
+  local al = getAddressList()
+  if al == nil then return nil end
+  return al.getMemoryRecordByDescription("Speed  (SET THIS - see README step 1)")
+end
+
+function corner.tick()
+  if not corner.on then return end
+  local rec = corner.speedRec()
+  if rec == nil then return end
+  local a = rec.CurrentAddress
+  if a == nil or a == 0 then return end
+
+  local s = readFloat(a)
+  if s == nil then return end
+
+  if corner.prev ~= nil then
+    local drop = corner.prev - s
+    if drop &gt; 0 and drop &lt; corner.brakeCut then
+      -- gentle drop = cornering scrub -&gt; restore most of it
+      writeFloat(a, s + drop * corner.retain)
+      s = readFloat(a) or s
+    end
+  end
+  corner.prev = s
+end
+
+corner.on = true
+if corner.timer ~= nil then corner.timer.destroy() end
+corner.timer = createTimer(nil)
+corner.timer.Interval = corner.interval
+corner.timer.OnTimer = function(t) corner.tick() end
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+if corner ~= nil then
+  corner.on = false
+  if corner.timer ~= nil then corner.timer.destroy(); corner.timer = nil end
+  corner.prev = nil
+end
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>103</ID>
+      <Description>"Grip / Traction  (optional - see README step 3)"</Description>
+      <ShowAsHex>0</ShowAsHex>
+      <VariableType>Float</VariableType>
+      <Address>0</Address>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>
