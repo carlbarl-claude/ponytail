@@ -21,32 +21,59 @@
       <Address>0</Address>
     </CheatEntry>
     <CheatEntry>
-      <ID>110</ID>
-      <Description>"[ Enable ] Core  (hotkeys + engine)"</Description>
+      <ID>111</ID>
+      <Description>"No Speed Loss  (F1)  - on automatically"</Description>
       <VariableType>Auto Assembler Script</VariableType>
       <AssemblerScript>{$lua}
 if syntaxcheck then return end
---------------------------------------------------------------------
--- NFS: The Run - Handling Mod core
---   No Speed Loss  (F1)  - anti-scrub, full retain
---   Max Grip       (F2)  - locks the grip float to a high value
--- Both also toggle from their checkboxes below.
---------------------------------------------------------------------
+if nfs == nil then print("Table script not running - reopen the .CT and click Yes."); return end
+nfs.setSpeed(true)
 
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+if nfs ~= nil then nfs.setSpeed(false) end
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>112</ID>
+      <Description>"Max Grip  (F2)  - needs Grip address"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{$lua}
+if syntaxcheck then return end
+if nfs == nil then print("Table script not running - reopen the .CT and click Yes."); return end
+nfs.setGrip(true)
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+if nfs ~= nil then nfs.setGrip(false) end
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+  <LuaScript>--------------------------------------------------------------------
+-- NFS: The Run - Handling Mod  (auto-run engine)
+-- This runs automatically when the table is opened.
+--   No Speed Loss  (F1)  - anti-scrub, keeps corner speed
+--   Max Grip       (F2)  - locks the grip float high
+-- Both turn on by themselves once the game connects (autoOn = true).
+--------------------------------------------------------------------
 nfs = nfs or {}
 
--- === TUNABLES ==============================================
-nfs.retain     = 1.00    -- 1.00 = no speed loss in corners. Lower (0.85) if it feels floaty.
-nfs.brakeCut   = 3.0     -- per-tick speed drop bigger than this = BRAKING (left alone).
-nfs.gripTarget = 2.0     -- value to lock grip at once you've set the Grip address (README step 3).
-nfs.interval   = 16      -- ms between checks (~60fps).
+-- === SETTINGS (edit these) =================================
+nfs.processName = "Need For Speed The Run.exe"  -- if attach fails, fix this to the real .exe name
+nfs.autoOn      = true    -- true = turn features on automatically when the game connects
+nfs.retain      = 1.00    -- 1.00 = no speed loss in corners. Lower (0.85) if it feels floaty.
+nfs.brakeCut    = 3.0     -- per-tick speed drop bigger than this = BRAKING (left alone).
+nfs.gripTarget  = 2.0     -- value Max Grip locks to (once Grip address is set).
+nfs.interval    = 16      -- ms between checks (~60fps).
 -- ===========================================================
 
 nfs.speedOn = nfs.speedOn or false
 nfs.gripOn  = nfs.gripOn  or false
 nfs.prev    = nil
 
-local function recByPrefix(prefix)
+function nfs.recByPrefix(prefix)
   local al = getAddressList(); if al == nil then return nil end
   for i = 0, al.Count - 1 do
     local r = al.getMemoryRecord(i)
@@ -58,9 +85,8 @@ local function recByPrefix(prefix)
 end
 
 function nfs.tick()
-  -- No Speed Loss
   if nfs.speedOn then
-    local r = recByPrefix("Speed")
+    local r = nfs.recByPrefix("Speed")
     if r ~= nil and r.CurrentAddress ~= nil and r.CurrentAddress ~= 0 then
       local s = readFloat(r.CurrentAddress)
       if s ~= nil then
@@ -78,9 +104,8 @@ function nfs.tick()
     nfs.prev = nil
   end
 
-  -- Max Grip
   if nfs.gripOn then
-    local g = recByPrefix("Grip")
+    local g = nfs.recByPrefix("Grip")
     if g ~= nil and g.CurrentAddress ~= nil and g.CurrentAddress ~= 0 then
       writeFloat(g.CurrentAddress, nfs.gripTarget)
     end
@@ -96,54 +121,25 @@ if nfs.hkGrip  ~= nil then nfs.hkGrip.destroy()  end
 nfs.hkSpeed = createHotkey(function() nfs.setSpeed(not nfs.speedOn) end, VK_F1)
 nfs.hkGrip  = createHotkey(function() nfs.setGrip(not nfs.gripOn)  end, VK_F2)
 
+-- main loop
 if nfs.timer ~= nil then nfs.timer.destroy() end
 nfs.timer = createTimer(nil)
 nfs.timer.Interval = nfs.interval
 nfs.timer.OnTimer = function(t) nfs.tick() end
 
-print("NFS handling mod loaded. F1 = No Speed Loss, F2 = Max Grip.")
-
-[DISABLE]
-{$lua}
-if syntaxcheck then return end
-if nfs ~= nil then
-  nfs.speedOn = false; nfs.gripOn = false; nfs.prev = nil
-  if nfs.timer   ~= nil then nfs.timer.destroy();   nfs.timer   = nil end
-  if nfs.hkSpeed ~= nil then nfs.hkSpeed.destroy(); nfs.hkSpeed = nil end
-  if nfs.hkGrip  ~= nil then nfs.hkGrip.destroy();  nfs.hkGrip  = nil end
-  print("NFS handling mod unloaded.")
+-- auto-attach: keep looking for the game, connect when it appears
+if nfs.attach ~= nil then nfs.attach.destroy() end
+nfs.attach = createTimer(nil)
+nfs.attach.Interval = 1000
+nfs.attach.OnTimer = function(t)
+  local pid = getProcessIDFromProcessName(nfs.processName)
+  if pid ~= nil and pid ~= 0 and getOpenedProcessID() ~= pid then
+    openProcess(pid)
+    print("Connected to " .. nfs.processName)
+    if nfs.autoOn then nfs.setSpeed(true); nfs.setGrip(true) end
+  end
 end
-</AssemblerScript>
-    </CheatEntry>
-    <CheatEntry>
-      <ID>111</ID>
-      <Description>"    No Speed Loss  (F1)"</Description>
-      <VariableType>Auto Assembler Script</VariableType>
-      <AssemblerScript>{$lua}
-if syntaxcheck then return end
-if nfs == nil then print("Enable [ Core ] first."); return end
-nfs.setSpeed(true)
 
-[DISABLE]
-{$lua}
-if syntaxcheck then return end
-if nfs ~= nil then nfs.setSpeed(false) end
-</AssemblerScript>
-    </CheatEntry>
-    <CheatEntry>
-      <ID>112</ID>
-      <Description>"    Max Grip  (F2)  - needs Grip address"</Description>
-      <VariableType>Auto Assembler Script</VariableType>
-      <AssemblerScript>{$lua}
-if syntaxcheck then return end
-if nfs == nil then print("Enable [ Core ] first."); return end
-nfs.setGrip(true)
-
-[DISABLE]
-{$lua}
-if syntaxcheck then return end
-if nfs ~= nil then nfs.setGrip(false) end
-</AssemblerScript>
-    </CheatEntry>
-  </CheatEntries>
+print("NFS handling mod ready. Waiting for the game...  (F1 = No Speed Loss, F2 = Max Grip)")
+</LuaScript>
 </CheatTable>

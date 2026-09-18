@@ -23,6 +23,31 @@ Fully reversible — Cheat Engine reads/writes memory while the game runs; nothi
 
 ---
 
+## Making it hands-off (for a kid / non-technical player)
+
+The table now **auto-runs and auto-attaches**: opening the `.CT` starts the engine (CE
+asks to run the script once → Yes), it waits for the game, connects on its own, and — with
+`autoOn = true` in the `<LuaScript>` — switches the features on automatically. See
+`HOW_TO_USE.md` for a 3-step sheet you can hand to someone else.
+
+**Two things to lock in first (you, once):**
+1. **Bake the Speed pointer** (Step 1 below) into the `Speed` entry, and ideally the Grip
+   offset (Step 3). A module-relative pointer works on any PC with the *same game version*,
+   so your finalized table works on your brother's machine too.
+2. **Confirm the process name.** Open the game, in CE do File → Open Process, and check the
+   exact `.exe` name. Put it in `nfs.processName` in the `<LuaScript>` block. (Common guesses:
+   `Need For Speed The Run.exe`, `NFS11.exe` — verify, don't assume.)
+
+**Want zero Cheat Engine UI for him?** Once the table works via baked addresses, CE can
+export it as a **standalone trainer `.exe`** (Table → *Create standalone trainer* / the
+Trainer Maker): a tiny window with on/off buttons, no CE knowledge needed. Tell me when your
+addresses are in and I'll set the trainer up (button labels, hotkeys, auto-attach).
+
+> ⚠️ Send me your **speed pointer path**, **grip offset**, and the **real .exe name** and I'll
+> hand back a finalized table (or trainer) that's genuinely double-click-and-play.
+
+---
+
 ## Step 1 — Find your Speed value (one-time)
 
 1. Get into a race, attach CE to the game.
@@ -36,10 +61,13 @@ Fully reversible — Cheat Engine reads/writes memory while the game runs; nothi
 
 ## Step 2 — Turn it on
 
-1. Load the `.CT`. Tick **`[ Enable ] Core`** first (starts the engine + registers F1/F2).
-2. Tick **`No Speed Loss`** (or press **F1** in-game). Drive — corners should hold speed.
+1. Open the `.CT` (double-click, or File → Open in CE). Click **Yes** to run the table script.
+   The engine starts, registers F1/F2, and begins watching for the game.
+2. Launch the game. It auto-connects; with `autoOn = true` the features switch on by themselves.
+   You can also toggle manually with the **`No Speed Loss`** / **`Max Grip`** checkboxes or **F1/F2**.
 
-**Tuning** (double-click `[ Enable ] Core`, edit the `TUNABLES` block, re-tick to reload):
+**Tuning** (edit the `SETTINGS` block in the `<LuaScript>` — Table → *Show cheat table Lua
+script* — then re-open the table or re-run the script):
 
 | Setting | Does | Try |
 |---|---|---|
