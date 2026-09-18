@@ -1,92 +1,73 @@
-# NFS: The Run — Corner Speed Assist (Cheat Engine)
+# NFS: The Run — Handling Mod (Cheat Engine)
 
-Single-player handling tweak: stop scrubbing so much speed in corners.
-Fully reversible — it's just Cheat Engine reading/writing memory while the game runs.
-Nothing on disk is modified.
+Single-player handling tweaks: **No Speed Loss** in corners + **Max Grip**.
+Fully reversible — Cheat Engine reads/writes memory while the game runs; nothing on disk changes.
 
 **Files**
-- `NFSTheRun_CornerSpeed.CT` — the table (anti-scrub script + placeholder entries).
+- `NFSTheRun_CornerSpeed.CT` — the table (core engine + two toggles + placeholder addresses).
+
+**Toggles**
+| Feature | Hotkey | Needs |
+|---|---|---|
+| **No Speed Loss** (anti-scrub, full retain) | **F1** | Speed address (Step 1) |
+| **Max Grip** (locks grip float high) | **F2** | Grip address (Step 3) |
 
 ---
 
 ## How it works
 
-Cornering speed loss is just your **speed value dropping** frame-to-frame while you
-turn. The `Anti-Scrub` script watches that value and, when it drops a *small* amount
-(a corner scrubbing speed) it gives most of it back — but ignores *large* drops so
-your **brakes still work normally**. One threshold (`brakeCut`) separates the two.
-
-The cleaner alternative — editing the actual grip float — is Step 3 (optional).
+- **No Speed Loss** watches your speed float. A *small* frame-to-frame drop = cornering
+  scrub → it's given straight back (`retain = 1.00`). A *large* drop = you braking →
+  left alone (`brakeCut`). So corners hold speed but **brakes still work**.
+- **Max Grip** just writes a high value to the car's grip/traction float every tick.
 
 ---
 
 ## Step 1 — Find your Speed value (one-time)
 
-You've done pointer scans before, so quick version:
+1. Get into a race, attach CE to the game.
+2. Float, **Unknown initial value**. Accelerate → `Increased`; coast/brake → `Decreased`.
+   Repeat until a few addresses remain. Confirm: freeze it → constant speed.
+3. **Pointer-scan** it (right-click → *Pointer scan for this address*), restart, re-find,
+   rescan until stable (level 5–6). Paste the pointer into the **`Speed`** entry.
 
-1. Launch The Run, get into a race, open CE, attach to the game process.
-2. Value type **Float**, scan type **Unknown initial value**.
-3. **Accelerate** on a straight → `Increased value`. Coast/brake → `Decreased value`.
-   Repeat 4–6 times until you're down to a handful of addresses. Speed sits in a
-   sensible range (often ~0–100 or ~0–300 depending on the unit — doesn't matter which).
-4. Add the winner to the list. Confirm it: freeze it and you should glide at constant speed.
+> The scripts match entries **by description prefix** (`Speed`, `Grip`), so you can rename
+> the tail freely — just keep the first word.
 
-**Make it stick across restarts (pointer scan):**
-5. Right-click the address → **Pointer scan for this address**. Play a bit, restart
-   the game, re-find speed, then **rescan** the pointermap with the new address until
-   you've got a stable pointer path (max level 5–6 is plenty).
-6. Copy that stable pointer into the table's **`Speed`** entry (base module + offsets).
+## Step 2 — Turn it on
 
-> ⚠️ Keep the `Speed` entry's description **exactly** as it ships
-> (`Speed  (SET THIS - see README step 1)`). The Lua finds the address *by that
-> description*. If you rename it, update the string inside `corner.speedRec()` to match.
+1. Load the `.CT`. Tick **`[ Enable ] Core`** first (starts the engine + registers F1/F2).
+2. Tick **`No Speed Loss`** (or press **F1** in-game). Drive — corners should hold speed.
 
----
+**Tuning** (double-click `[ Enable ] Core`, edit the `TUNABLES` block, re-tick to reload):
 
-## Step 2 — Turn on Anti-Scrub
-
-1. Load `NFSTheRun_CornerSpeed.CT` (File → Open, or drag onto CE).
-2. Tick the box on **`[ Enable ] Anti-Scrub`**.
-3. Drive. Corners should hold speed; braking should still slow you.
-
-**Tuning** — double-click the script to edit the `TUNABLES` block:
-
-| Setting | What it does | Try |
+| Setting | Does | Try |
 |---|---|---|
-| `retain` | How much scrubbed speed to give back (0–1). | Start `0.90`. Feels sluggish/floaty? lower to `0.7`. Want almost no loss? `0.98`. |
-| `brakeCut` | Per-tick drop above this = "braking", left alone. | Start `3.0`. If **braking feels weak** → lower it. If corners **still scrub** → raise it. |
-| `interval` | ms between checks. | Leave at `16` (~60fps). |
+| `retain` | Fraction of scrubbed speed returned. | `1.00` = no loss. Feels floaty/twitchy? drop to `0.85`. |
+| `brakeCut` | Per-tick drop above this = braking, ignored. | `3.0`. Braking weak? lower it. Corners still scrub? raise it. |
+| `gripTarget` | Value Max Grip locks to (Step 3). | `2.0`. Raise for more stick. |
 
-Re-tick the box after editing to reload the script.
+> `brakeCut` is in the game's raw speed unit, so tune it live for a minute: find the value
+> where hard braking still slows you but gentle cornering doesn't bleed speed.
 
-> The right `brakeCut` depends on the game's speed unit, so it's trial-and-error for a
-> minute. Find the value where hard braking still works but gentle cornering doesn't bleed speed.
+## Step 3 — Find Grip for Max Grip (optional but that's the "real" fix)
 
----
+1. Right-click **Speed** → *Find out what accesses this address*. Drive; double-click a
+   listed instruction → note its **base register/pointer**.
+2. Right-click → *Dissect data/structures* on that base. You'll see the vehicle floats:
+   mass, downforce, steering, **grip/traction**, drag…
+3. Change candidates one at a time while driving to spot grip (usually ~0.5–2.0; higher =
+   sticks to the road, less understeer). Paste it into the **`Grip`** entry.
+4. Set `gripTarget` in the TUNABLES to how sticky you want it, then tick **`Max Grip`** / **F2**.
 
-## Step 3 — (Optional) Edit the real grip value
-
-Cleaner than anti-scrub, but more digging. Once you trust your Speed pointer, the
-vehicle's physics floats usually live in the **same struct** nearby.
-
-1. Right-click Speed → **Find out what accesses this address**. Drive around; CE lists
-   instructions touching the car struct. Double-click one → note the **base register**.
-2. Right-click that instruction → **Dissect data/structures** on the base pointer.
-   You'll see a block of floats: mass, downforce, steering, grip/traction, drag, etc.
-3. Change candidates *one at a time* while driving to identify grip/lateral friction.
-   (Grip usually 0.5–2.0-ish; bumping it up = sticks to the road, less understeer.)
-4. Put the winner in the **`Grip / Traction`** entry, freeze it at a higher value, done.
-
-If you find it, paste the offset here and I'll wire it into the table with a hotkey +
-multiplier so you're not just hard-freezing a raw value.
+Send me your **speed unit / pointer path** or the **grip offset** and I'll pin exact defaults.
 
 ---
 
 ## Troubleshooting
 
-- **Nothing happens** → the `Speed` address is `0`/stale. Redo Step 1 or fix the pointer.
-- **Car feels like it's on ice / won't slow** → `retain` too high or `brakeCut` too low.
-- **Still scrubs in corners** → `brakeCut` too low (raise it) or `retain` too low.
-- **Script won't enable** → check the `Speed` entry description matches `corner.speedRec()`.
-
-Send me the numbers you land on (or your speed unit / pointer path) and I'll tighten it up.
+- **F1/F2 do nothing** → `[ Enable ] Core` isn't ticked, or the address is still `0`.
+- **Toggle says "Enable Core first"** → tick `[ Enable ] Core` before the sub-toggles.
+- **Car's on ice / won't slow** → `retain` too high or `brakeCut` too low.
+- **Still scrubs** → `brakeCut` too low (raise it).
+- **Max Grip snaps back** → Grip address `0`/wrong, or it's not the grip float — redo Step 3.

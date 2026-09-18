@@ -3,91 +3,147 @@
   <CheatEntries>
     <CheatEntry>
       <ID>100</ID>
-      <Description>"=== NFS: The Run - Corner Speed Assist ==="</Description>
+      <Description>"=== NFS: The Run - Handling Mod ==="</Description>
       <GroupHeader>1</GroupHeader>
     </CheatEntry>
     <CheatEntry>
       <ID>101</ID>
-      <Description>"Speed  (SET THIS - see README step 1)"</Description>
+      <Description>"Speed  (SET THIS - README step 1)"</Description>
       <ShowAsHex>0</ShowAsHex>
       <VariableType>Float</VariableType>
       <Address>0</Address>
     </CheatEntry>
     <CheatEntry>
-      <ID>102</ID>
-      <Description>"[ Enable ] Anti-Scrub  (keep corner speed)"</Description>
+      <ID>103</ID>
+      <Description>"Grip / Traction  (SET THIS - README step 3)"</Description>
+      <ShowAsHex>0</ShowAsHex>
+      <VariableType>Float</VariableType>
+      <Address>0</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>110</ID>
+      <Description>"[ Enable ] Core  (hotkeys + engine)"</Description>
       <VariableType>Auto Assembler Script</VariableType>
       <AssemblerScript>{$lua}
 if syntaxcheck then return end
 --------------------------------------------------------------------
--- NFS: The Run - Corner Speed Assist (anti-scrub)
---------------------------------------------------------------------
--- Reads the memory record described exactly "Speed" (entry above),
--- watches it every tick, and when speed drops a SMALL amount
--- (cornering scrub) it gives most of that speed back. A LARGE drop
--- (you braking) is left alone.
+-- NFS: The Run - Handling Mod core
+--   No Speed Loss  (F1)  - anti-scrub, full retain
+--   Max Grip       (F2)  - locks the grip float to a high value
+-- Both also toggle from their checkboxes below.
 --------------------------------------------------------------------
 
-corner = corner or {}
+nfs = nfs or {}
 
 -- === TUNABLES ==============================================
-corner.retain   = 0.90   -- fraction of scrubbed speed to give back (0..1). Higher = holds more speed.
-corner.brakeCut = 3.0    -- per-tick drop bigger than this is treated as BRAKING (left alone).
-                         -- Units are "whatever the Speed value is per 16ms". Tune while playing.
-corner.interval = 16     -- ms between checks (16 = ~60fps).
+nfs.retain     = 1.00    -- 1.00 = no speed loss in corners. Lower (0.85) if it feels floaty.
+nfs.brakeCut   = 3.0     -- per-tick speed drop bigger than this = BRAKING (left alone).
+nfs.gripTarget = 2.0     -- value to lock grip at once you've set the Grip address (README step 3).
+nfs.interval   = 16      -- ms between checks (~60fps).
 -- ===========================================================
 
-corner.prev = nil
+nfs.speedOn = nfs.speedOn or false
+nfs.gripOn  = nfs.gripOn  or false
+nfs.prev    = nil
 
-function corner.speedRec()
-  local al = getAddressList()
-  if al == nil then return nil end
-  return al.getMemoryRecordByDescription("Speed  (SET THIS - see README step 1)")
-end
-
-function corner.tick()
-  if not corner.on then return end
-  local rec = corner.speedRec()
-  if rec == nil then return end
-  local a = rec.CurrentAddress
-  if a == nil or a == 0 then return end
-
-  local s = readFloat(a)
-  if s == nil then return end
-
-  if corner.prev ~= nil then
-    local drop = corner.prev - s
-    if drop &gt; 0 and drop &lt; corner.brakeCut then
-      -- gentle drop = cornering scrub -&gt; restore most of it
-      writeFloat(a, s + drop * corner.retain)
-      s = readFloat(a) or s
+local function recByPrefix(prefix)
+  local al = getAddressList(); if al == nil then return nil end
+  for i = 0, al.Count - 1 do
+    local r = al.getMemoryRecord(i)
+    if r ~= nil and r.Description ~= nil and r.Description:sub(1, #prefix) == prefix then
+      return r
     end
   end
-  corner.prev = s
+  return nil
 end
 
-corner.on = true
-if corner.timer ~= nil then corner.timer.destroy() end
-corner.timer = createTimer(nil)
-corner.timer.Interval = corner.interval
-corner.timer.OnTimer = function(t) corner.tick() end
+function nfs.tick()
+  -- No Speed Loss
+  if nfs.speedOn then
+    local r = recByPrefix("Speed")
+    if r ~= nil and r.CurrentAddress ~= nil and r.CurrentAddress ~= 0 then
+      local s = readFloat(r.CurrentAddress)
+      if s ~= nil then
+        if nfs.prev ~= nil then
+          local drop = nfs.prev - s
+          if drop &gt; 0 and drop &lt; nfs.brakeCut then
+            writeFloat(r.CurrentAddress, s + drop * nfs.retain)
+            s = readFloat(r.CurrentAddress) or s
+          end
+        end
+        nfs.prev = s
+      end
+    end
+  else
+    nfs.prev = nil
+  end
+
+  -- Max Grip
+  if nfs.gripOn then
+    local g = recByPrefix("Grip")
+    if g ~= nil and g.CurrentAddress ~= nil and g.CurrentAddress ~= 0 then
+      writeFloat(g.CurrentAddress, nfs.gripTarget)
+    end
+  end
+end
+
+function nfs.setSpeed(v) nfs.speedOn = v; if not v then nfs.prev = nil end; print("No Speed Loss: " .. tostring(v)) end
+function nfs.setGrip(v)  nfs.gripOn  = v; print("Max Grip: " .. tostring(v)) end
+
+-- hotkeys (F1 / F2)
+if nfs.hkSpeed ~= nil then nfs.hkSpeed.destroy() end
+if nfs.hkGrip  ~= nil then nfs.hkGrip.destroy()  end
+nfs.hkSpeed = createHotkey(function() nfs.setSpeed(not nfs.speedOn) end, VK_F1)
+nfs.hkGrip  = createHotkey(function() nfs.setGrip(not nfs.gripOn)  end, VK_F2)
+
+if nfs.timer ~= nil then nfs.timer.destroy() end
+nfs.timer = createTimer(nil)
+nfs.timer.Interval = nfs.interval
+nfs.timer.OnTimer = function(t) nfs.tick() end
+
+print("NFS handling mod loaded. F1 = No Speed Loss, F2 = Max Grip.")
 
 [DISABLE]
 {$lua}
 if syntaxcheck then return end
-if corner ~= nil then
-  corner.on = false
-  if corner.timer ~= nil then corner.timer.destroy(); corner.timer = nil end
-  corner.prev = nil
+if nfs ~= nil then
+  nfs.speedOn = false; nfs.gripOn = false; nfs.prev = nil
+  if nfs.timer   ~= nil then nfs.timer.destroy();   nfs.timer   = nil end
+  if nfs.hkSpeed ~= nil then nfs.hkSpeed.destroy(); nfs.hkSpeed = nil end
+  if nfs.hkGrip  ~= nil then nfs.hkGrip.destroy();  nfs.hkGrip  = nil end
+  print("NFS handling mod unloaded.")
 end
 </AssemblerScript>
     </CheatEntry>
     <CheatEntry>
-      <ID>103</ID>
-      <Description>"Grip / Traction  (optional - see README step 3)"</Description>
-      <ShowAsHex>0</ShowAsHex>
-      <VariableType>Float</VariableType>
-      <Address>0</Address>
+      <ID>111</ID>
+      <Description>"    No Speed Loss  (F1)"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{$lua}
+if syntaxcheck then return end
+if nfs == nil then print("Enable [ Core ] first."); return end
+nfs.setSpeed(true)
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+if nfs ~= nil then nfs.setSpeed(false) end
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>112</ID>
+      <Description>"    Max Grip  (F2)  - needs Grip address"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{$lua}
+if syntaxcheck then return end
+if nfs == nil then print("Enable [ Core ] first."); return end
+nfs.setGrip(true)
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+if nfs ~= nil then nfs.setGrip(false) end
+</AssemblerScript>
     </CheatEntry>
   </CheatEntries>
 </CheatTable>
