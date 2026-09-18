@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+state.json
 
 # Student-uploaded study materials (may be copyrighted / personal) — keep local.
 knowledge/*/uploads/*

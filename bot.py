@@ -4,16 +4,28 @@ Focus: tutoring & explanations for AP Seminar and AP European History.
 
 How to use it in Discord:
 - Mention the bot (@BotName your question) or DM it directly to ask anything.
+- Attach a PDF/TXT/MD to add it to the study library.
+- /grade <work>            — score your writing point-by-point on the rubric.
+- /quiz [topic]            — get a realistic practice question.
 - /subject seminar | euro  — switch which AP class the bot tutors for (per channel).
+- /sources                 — see what's in the study library.
+- /reindex                 — rebuild the library index.
 - /reset                   — clear the conversation history for the channel.
 - /help                    — show what the bot can do.
 
 Conversation memory is kept per channel so a back-and-forth stays coherent,
-and trimmed so requests stay affordable.
+and trimmed so requests stay affordable. The chosen subject persists across restarts.
 """
 
 import os
+import json
 import collections
+
+try:
+    from dotenv import load_dotenv  # optional convenience: auto-load a .env file
+    load_dotenv()
+except ImportError:
+    pass
 
 import anthropic
 import discord
@@ -21,29 +33,51 @@ from discord import app_commands
 
 import prompts
 import rag
+import tutor
 
 # --- Configuration ---------------------------------------------------------
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 # Default to Opus 5 for the best tutoring quality. Set TUTOR_MODEL=claude-sonnet-5
 # in the environment to cut cost roughly in half if you're sending lots of messages.
-MODEL = os.environ.get("TUTOR_MODEL", "claude-opus-5")
+MODEL = os.environ.get("TUTOR_MODEL", tutor.MODEL_DEFAULT)
 MAX_TOKENS = 1600  # Roughly fits a Discord message; long answers get split.
 # How many prior turns (user+assistant pairs) to remember per channel.
 HISTORY_TURNS = 10
 
 DISCORD_LIMIT = 2000  # Discord's hard per-message character cap.
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 # --- State -----------------------------------------------------------------
 
-claude = anthropic.AsyncAnthropic()  # reads ANTHROPIC_API_KEY from the environment
+# Constructed in main() once the API key is confirmed (reads ANTHROPIC_API_KEY).
+claude: anthropic.AsyncAnthropic | None = None
 
 # Per-channel conversation history: channel_id -> deque of message dicts.
 _histories: dict[int, collections.deque] = collections.defaultdict(
     lambda: collections.deque(maxlen=HISTORY_TURNS * 2)
 )
-# Per-channel chosen subject: channel_id -> subject key.
-_subjects: dict[int, str] = {}
+
+
+def _load_subjects() -> dict[int, str]:
+    """Per-channel subject choice, persisted so it survives restarts."""
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return {int(k): v for k, v in json.load(f).get("subjects", {}).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+_subjects: dict[int, str] = _load_subjects()
+
+
+def _save_subjects() -> None:
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"subjects": {str(k): v for k, v in _subjects.items()}}, f)
+    except OSError as e:
+        print(f"[bot] could not save state: {e}")
+
 
 intents = discord.Intents.default()
 intents.message_content = True  # required to read message text for mention/DM handling
@@ -77,43 +111,12 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
     return chunks
 
 
-# Appended to the subject system prompt to tell Claude how to use retrieved material.
-_GROUNDING_INSTRUCTIONS = """
---- Using the study library ---
-Below you may be given a STUDY LIBRARY CONTEXT block: excerpts retrieved from a
-library of AP rubrics, scored sample responses, and the student's own uploaded notes.
-When it's relevant to the question:
-- Cite the specific rubric criterion by name (e.g., "DBQ · Complexity (1 pt)").
-- When a scored sample is relevant, reference it and explain *why* it earned (or lost)
-  its score — connect the student's situation to that example.
-- Prefer the retrieved material over generic advice for anything about scoring.
-- Samples labeled "scored sample" in the built-in library are illustrative/synthetic
-  teaching examples, not official College Board samples — you may say so if asked.
-  Material labeled "your upload" is the student's own file.
-If the context doesn't cover something, use your general AP knowledge and say the
-library didn't have specifics on it. Never invent a rubric point value or a fake
-"official sample" — only cite what's actually provided or well-established.
-"""
-
-
-async def ask_claude(channel_id: int, user_text: str) -> str:
-    """Send the channel's history plus the new message to Claude and return the reply."""
-    subject_key = subject_for(channel_id)
-    subject_name, system_prompt = prompts.SUBJECTS[subject_key]
-    history = _histories[channel_id]
-
-    # Retrieve relevant rubric/sample/upload excerpts and ground the answer in them.
-    system_prompt = system_prompt + _GROUNDING_INSTRUCTIONS
-    context_block = rag.build_context(subject_key, user_text)
-    if context_block:
-        system_prompt = system_prompt + "\n\n" + context_block
-
-    messages = list(history) + [{"role": "user", "content": user_text}]
-
+async def _call(system_prompt: str, messages: list, max_tokens: int = MAX_TOKENS) -> str:
+    """One grounded Claude call with friendly error messages."""
     try:
         response = await claude.messages.create(
             model=MODEL,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens,
             system=system_prompt,
             thinking={"type": "adaptive"},
             messages=messages,
@@ -124,10 +127,17 @@ async def ask_claude(channel_id: int, user_text: str) -> str:
         return f"Something went wrong reaching my brain (error {e.status_code}). Try again in a moment."
     except anthropic.APIConnectionError:
         return "I couldn't connect just now. Please try again in a moment."
+    return tutor.extract_text(response)
 
-    reply = "".join(b.text for b in response.content if b.type == "text").strip()
-    if not reply:
-        reply = "Hmm, I didn't have a good answer for that — can you rephrase or add a bit more detail?"
+
+async def ask_claude(channel_id: int, user_text: str) -> str:
+    """Send the channel's history plus the new message to Claude and return the reply."""
+    subject_key = subject_for(channel_id)
+    system_prompt = tutor.tutor_system(subject_key, user_text)
+    history = _histories[channel_id]
+    messages = list(history) + [{"role": "user", "content": user_text}]
+
+    reply = await _call(system_prompt, messages)
 
     # Persist this turn so follow-ups have context.
     history.append({"role": "user", "content": user_text})
@@ -169,19 +179,22 @@ async def on_message(message: discord.Message):
         a for a in message.attachments
         if os.path.splitext(a.filename)[1].lower() in {".pdf", ".txt", ".md"}
     ]
-    if ingestible:
-        async with message.channel.typing():
-            for att in ingestible:
-                data = await att.read()
-                ok, note = rag.ingest_upload(subject_key, att.filename, data)
-                await message.channel.send(note)
-
     # Strip the bot mention out of the text so it doesn't confuse Claude.
     content = message.content
     if is_mention:
         content = content.replace(f"<@{client.user.id}>", "").replace(
             f"<@!{client.user.id}>", ""
         ).strip()
+
+    if ingestible:
+        async with message.channel.typing():
+            for att in ingestible:
+                data = await att.read()
+                ok, note = rag.ingest_upload(subject_key, att.filename, data)
+                await message.channel.send(note)
+        # If they only sent files (no question), stop here — no need to greet.
+        if not content:
+            return
 
     if not content:
         subject_name = prompts.SUBJECTS[subject_for(message.channel.id)][0]
@@ -207,11 +220,39 @@ async def on_message(message: discord.Message):
 )
 async def subject_cmd(interaction: discord.Interaction, subject: app_commands.Choice[str]):
     _subjects[interaction.channel_id] = subject.value
+    _save_subjects()  # remember the choice across restarts
     # A subject switch starts a fresh conversation so context doesn't bleed across classes.
     _histories.pop(interaction.channel_id, None)
     await interaction.response.send_message(
         f"Switched to **{subject.name}** for this channel. Fresh start — what are we working on? 📚"
     )
+
+
+async def _send_long(interaction: discord.Interaction, text: str) -> None:
+    """Send a possibly-long deferred reply via followups, split to Discord's limit."""
+    for chunk in split_message(text):
+        await interaction.followup.send(chunk)
+
+
+@tree.command(name="grade", description="Score your writing point-by-point against the AP rubric.")
+@app_commands.describe(work="Paste your thesis, paragraph, SAQ answer, or essay excerpt.")
+async def grade_cmd(interaction: discord.Interaction, work: str):
+    await interaction.response.defer(thinking=True)
+    subject_key = subject_for(interaction.channel_id)
+    system_prompt = tutor.grade_system(subject_key, work)
+    reply = await _call(system_prompt, [{"role": "user", "content": work}], max_tokens=2200)
+    await _send_long(interaction, reply)
+
+
+@tree.command(name="quiz", description="Get a realistic AP practice question to try.")
+@app_commands.describe(topic="Optional: a topic or unit to focus on.")
+async def quiz_cmd(interaction: discord.Interaction, topic: str = ""):
+    await interaction.response.defer(thinking=True)
+    subject_key = subject_for(interaction.channel_id)
+    system_prompt = tutor.quiz_system(subject_key, topic)
+    prompt_msg = topic.strip() or "Give me a practice question."
+    reply = await _call(system_prompt, [{"role": "user", "content": prompt_msg}], max_tokens=2000)
+    await _send_long(interaction, reply)
 
 
 @tree.command(name="sources", description="Show what's in the study library for this channel.")
@@ -257,12 +298,15 @@ async def help_cmd(interaction: discord.Interaction):
         "• **Upload your own** notes/readings/PDFs — just attach a PDF, TXT, or MD "
         "file and I'll start using it.\n\n"
         "**Commands**\n"
+        "• `/grade` — paste your writing; I score it point-by-point on the rubric.\n"
+        "• `/quiz` — get a realistic practice question (optionally on a topic).\n"
         "• `/subject` — switch between AP Seminar and AP European History.\n"
         "• `/sources` — see what's in the study library here.\n"
         "• `/reindex` — rebuild the library index after adding files.\n"
         "• `/reset` — clear our conversation history in this channel.\n"
         "• `/help` — show this message.\n\n"
-        "Try: *\"Explain HIPP with an example\"* or *\"Grade this thesis against the DBQ rubric.\"*",
+        "Try: *\"Explain HIPP with an example\"*, `/quiz causation`, or "
+        "`/grade <your thesis>`.",
         ephemeral=True,
     )
 
@@ -270,11 +314,28 @@ async def help_cmd(interaction: discord.Interaction):
 # --- Entry point -----------------------------------------------------------
 
 def main():
-    if not DISCORD_TOKEN:
-        raise SystemExit("Set the DISCORD_TOKEN environment variable (see .env.example).")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("Set the ANTHROPIC_API_KEY environment variable (see .env.example).")
-    client.run(DISCORD_TOKEN)
+    missing = [name for name in ("DISCORD_TOKEN", "ANTHROPIC_API_KEY")
+               if not os.environ.get(name)]
+    if missing:
+        raise SystemExit(
+            "Missing required setting(s): " + ", ".join(missing) + ".\n"
+            "Copy .env.example to .env and fill them in (the bot auto-loads .env),\n"
+            "or export them as environment variables. See the README for details.\n"
+            "Tip: to try the tutor without Discord, run `python chat.py` "
+            "(only ANTHROPIC_API_KEY needed)."
+        )
+    global claude
+    claude = anthropic.AsyncAnthropic()
+    try:
+        client.run(DISCORD_TOKEN)
+    except discord.PrivilegedIntentsRequired:
+        raise SystemExit(
+            "Discord rejected the login because the Message Content Intent is off.\n"
+            "Enable it: Developer Portal → your app → Bot → Privileged Gateway "
+            "Intents → turn on MESSAGE CONTENT INTENT, then rerun."
+        )
+    except discord.LoginFailure:
+        raise SystemExit("Discord rejected the token. Double-check DISCORD_TOKEN in your .env.")
 
 
 if __name__ == "__main__":

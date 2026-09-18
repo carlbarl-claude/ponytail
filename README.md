@@ -22,11 +22,26 @@ rubrics, and coaches your own writing — but it won't do graded work for you.
 
 | Command | What it does |
 |---|---|
-| `/subject` | Switch between **AP Seminar** and **AP European History** for the channel |
+| `/grade <work>` | Score your thesis/paragraph/essay point-by-point against the rubric |
+| `/quiz [topic]` | Generate a realistic AP practice question (optionally on a topic) |
+| `/subject` | Switch between **AP Seminar** and **AP European History** (remembered across restarts) |
 | `/sources` | Show what's in the study library for the channel |
 | `/reindex` | Rebuild the library index after adding files on disk |
 | `/reset` | Clear the conversation history in the channel |
 | `/help` | Show what the bot can do |
+
+## Try it without Discord (local mode)
+
+Want to test the tutor before setting up a Discord bot? You only need an
+`ANTHROPIC_API_KEY`:
+
+```bash
+pip install -r requirements.txt
+python chat.py            # or: python chat.py euro / python chat.py seminar
+```
+
+It's a terminal chat with the same brain and study library. In-chat commands:
+`:subject euro|seminar`, `:grade <text>`, `:quiz [topic]`, `:sources`, `:reset`, `:quit`.
 
 ## How the grounding works (RAG)
 
@@ -71,13 +86,13 @@ From the [Anthropic Console](https://console.anthropic.com/settings/keys) → th
 pip install -r requirements.txt
 
 cp .env.example .env      # then edit .env with your real tokens
-export $(grep -v '^#' .env | xargs)   # load them (macOS/Linux)
 
 python bot.py
 ```
 
-The bot syncs its slash commands on startup and prints a "Logged in as…" line
-when it's ready.
+The bot **auto-loads `.env`** — no manual `export` needed. It syncs its slash
+commands on startup and prints a "Logged in as…" line when it's ready. If a token
+is missing or the Message Content Intent is off, it tells you exactly what to fix.
 
 ## Cost note
 
@@ -87,7 +102,9 @@ environment — roughly half the cost, still a strong tutor.
 
 ## Files
 
-- `bot.py` — the Discord bot (events, commands, Claude calls, uploads, message splitting)
+- `bot.py` — the Discord bot (events, commands, uploads, message splitting)
+- `chat.py` — local terminal test mode (no Discord needed)
+- `tutor.py` — shared tutoring/grading/quiz prompt logic used by the bot and CLI
 - `prompts.py` — the tutoring personas and rubric knowledge for each subject
 - `rag.py` — the study-library retrieval engine (indexing, BM25 search, upload ingest)
 - `knowledge/` — the study library (rubric summaries, illustrative samples, uploads)
